@@ -223,6 +223,7 @@
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('list')">📋 Объявления</button>
       <button class="tab-btn" onclick="switchTab('create')">➕ Создать</button>
+      <button class="tab-btn" onclick="switchTab('polls')">📊 Опросы</button>
     </div>
 
     <!-- LIST -->
@@ -288,6 +289,47 @@
         <div class="status" id="form-status"></div>
       </div>
     </section>
+
+    <!-- POLLS -->
+    <section class="section" id="sec-polls">
+      <div class="card">
+        <div class="card-title">Создать опрос</div>
+        <label class="form-label">Приложения</label>
+        <div class="app-checks" id="poll-app-checks">
+          <label class="app-check"><input type="checkbox" value="namaz">🕌 Намаз</label>
+          <label class="app-check"><input type="checkbox" value="awareness">🌿 Осознанность</label>
+          <label class="app-check"><input type="checkbox" value="fitcore">💪 FitCore</label>
+          <label class="app-check"><input type="checkbox" value="lesso">📚 Lesso</label>
+          <label class="app-check"><input type="checkbox" value="sledopyt">🗺️ Следопыт</label>
+          <label class="app-check"><input type="checkbox" value="raketa">🚀 Ракета</label>
+        </div>
+        <label class="form-label">Вопрос *</label>
+        <input class="form-input" id="pf-question" placeholder="Как вам приложение?">
+        <label class="form-label">Тип опроса</label>
+        <select class="form-select" id="pf-type" onchange="togglePollType()">
+          <option value="choice">Выбор из вариантов</option>
+          <option value="text">Произвольный ответ</option>
+        </select>
+        <div id="pf-options-wrap">
+          <label class="form-label">Варианты ответов (по одному на строку)</label>
+          <textarea class="form-textarea" id="pf-options" placeholder="Отлично&#10;Хорошо&#10;Нормально&#10;Плохо" style="min-height:100px"></textarea>
+        </div>
+        <div class="form-row">
+          <div><label class="form-label">С</label><input class="form-input" type="datetime-local" id="pf-from"></div>
+          <div><label class="form-label">До</label><input class="form-input" type="datetime-local" id="pf-until"></div>
+        </div>
+        <div class="toggle-wrap">
+          <button class="toggle" id="pf-active-toggle" onclick="togglePollActive()"></button>
+          <span class="toggle-label" id="pf-active-label">Неактивно</span>
+        </div>
+        <button class="btn btn-primary" onclick="savePoll()">💾 Сохранить опрос</button>
+        <div class="status" id="poll-form-status"></div>
+      </div>
+      <div class="card" style="margin-top:0.875rem">
+        <div class="card-title">Опросы и результаты</div>
+        <div id="polls-list"><div class="empty">Загрузка...</div></div>
+      </div>
+    </section>
   </div>
 </div>
 
@@ -332,6 +374,7 @@
     const tabBtn = document.querySelector(`.tab-btn[onclick="switchTab('${tab}')"]`);
     if (tabBtn) tabBtn.classList.add('active');
     if (tab === 'list') loadList();
+    if (tab === 'polls') loadPolls();
     if (tab === 'create' && !skipReset) {
       resetForm();
       document.getElementById('form-title').textContent = 'Новое объявление';
@@ -547,8 +590,143 @@
     document.getElementById('form-title').textContent = 'Новое объявление';
   };
 
+  // ── POLLS ──
+  const togglePollType = () => {
+    const type = document.getElementById('pf-type').value;
+    document.getElementById('pf-options-wrap').style.display = type === 'choice' ? 'block' : 'none';
+  };
+
+  let pollActiveState = false;
+  const togglePollActive = () => {
+    pollActiveState = !pollActiveState;
+    document.getElementById('pf-active-toggle').classList.toggle('on', pollActiveState);
+    document.getElementById('pf-active-label').textContent = pollActiveState ? 'Активно' : 'Неактивно';
+  };
+
+  const getPollCheckedApps = () => {
+    return [...document.querySelectorAll('#poll-app-checks input:checked')].map(el => el.value);
+  };
+
+  const savePoll = async () => {
+    const question = document.getElementById('pf-question').value.trim();
+    const type = document.getElementById('pf-type').value;
+    const apps = getPollCheckedApps();
+    if (!question) { showPollStatus('⚠️ Введи вопрос', 'err'); return; }
+    if (!apps.length) { showPollStatus('⚠️ Выбери приложение', 'err'); return; }
+
+    let options = null;
+    if (type === 'choice') {
+      const raw = document.getElementById('pf-options').value.trim();
+      options = raw.split('\n').map(s => s.trim()).filter(Boolean);
+      if (options.length < 2) { showPollStatus('⚠️ Минимум 2 варианта', 'err'); return; }
+    }
+
+    const fromVal = document.getElementById('pf-from').value;
+    const untilVal = document.getElementById('pf-until').value;
+
+    let ok_all = true;
+    for (const appId of apps) {
+      const { ok } = await sbFetch('polls', {
+        method: 'POST',
+        body: JSON.stringify({
+          app_id: appId, question, type,
+          options: options ? JSON.stringify(options) : null,
+          show_from: fromVal ? new Date(fromVal).toISOString() : null,
+          show_until: untilVal ? new Date(untilVal).toISOString() : null,
+          active: document.getElementById('pf-active-toggle').classList.contains('on'),
+        })
+      });
+      if (!ok) ok_all = false;
+    }
+
+    if (ok_all) {
+      showPollStatus('✅ Опрос создан!', 'ok');
+      setTimeout(() => loadPolls(), 1000);
+    } else {
+      showPollStatus('❌ Ошибка — проверь права в Supabase', 'err');
+    }
+  };
+
+  const showPollStatus = (msg, type) => {
+    const el = document.getElementById('poll-form-status');
+    el.textContent = msg; el.className = 'status ' + type;
+    setTimeout(() => el.className = 'status', 3000);
+  };
+
+  const loadPolls = async () => {
+    document.getElementById('polls-list').innerHTML = '<div class="empty">Загрузка...</div>';
+    const { ok, data } = await sbFetch('polls?order=created_at.desc');
+    if (!ok || !Array.isArray(data)) {
+      document.getElementById('polls-list').innerHTML = '<div class="empty">Ошибка загрузки</div>';
+      return;
+    }
+    if (!data.length) {
+      document.getElementById('polls-list').innerHTML = '<div class="empty">Опросов пока нет</div>';
+      return;
+    }
+    document.getElementById('polls-list').innerHTML = data.map(p => `
+      <div class="ann-item ${p.active ? 'active-ann' : ''}" style="margin-bottom:0.75rem">
+        <div class="ann-item-header">
+          <div class="ann-item-title">${p.question}</div>
+          <span class="ann-badge ${p.active ? 'badge-active' : 'badge-inactive'}">${p.active ? '● Активно' : '○ Неактивно'}</span>
+        </div>
+        <div class="ann-apps">📱 ${p.app_id} · ${p.type === 'choice' ? 'Выбор' : 'Текст'}</div>
+        <div class="btn-row" style="margin-top:0.5rem">
+          <button class="btn btn-success" onclick="loadPollResults('${p.id}', this)">📊 Результаты</button>
+          <button class="btn ${p.active ? 'btn-danger' : 'btn-success'}" onclick="togglePollActive2('${p.id}', ${!p.active})">
+            ${p.active ? '⏸ Стоп' : '▶️ Старт'}
+          </button>
+          <button class="btn btn-danger" onclick="deletePoll('${p.id}')">🗑️</button>
+        </div>
+        <div id="results-${p.id}" style="display:none;margin-top:0.75rem"></div>
+      </div>
+    `).join('');
+  };
+
+  const loadPollResults = async (pollId, btn) => {
+    const el = document.getElementById('results-' + pollId);
+    if (el.style.display !== 'none') { el.style.display = 'none'; btn.textContent = '📊 Результаты'; return; }
+    btn.textContent = '⏳...';
+    const { ok, data } = await sbFetch('poll_answers?poll_id=eq.' + pollId + '&order=created_at.desc');
+    if (!ok || !Array.isArray(data)) { el.innerHTML = '<div style="color:var(--red);font-size:0.8rem">Ошибка загрузки</div>'; }
+    else if (!data.length) { el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:0.5rem">Ответов пока нет</div>'; }
+    else {
+      // Count answers
+      const counts = {};
+      data.forEach(a => { counts[a.answer] = (counts[a.answer] || 0) + 1; });
+      const total = data.length;
+      const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+      el.innerHTML = `<div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem">Всего ответов: ${total}</div>`
+        + sorted.map(([ans, cnt]) => {
+          const pct = Math.round(cnt/total*100);
+          return `<div style="margin-bottom:0.4rem">
+            <div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:0.2rem">
+              <span>${ans}</span><span style="color:var(--accent)">${cnt} (${pct}%)</span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px">
+              <div style="height:6px;width:${pct}%;background:var(--accent);border-radius:3px;transition:width 0.5s"></div>
+            </div>
+          </div>`;
+        }).join('');
+    }
+    el.style.display = 'block';
+    btn.textContent = '📊 Скрыть';
+  };
+
+  const togglePollActive2 = async (id, active) => {
+    await sbFetch('polls?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ active }) });
+    loadPolls();
+  };
+
+  const deletePoll = async (id) => {
+    if (!confirm('Удалить опрос и все ответы?')) return;
+    await sbFetch('polls?id=eq.' + id, { method: 'DELETE' });
+    loadPolls();
+  };
+  // ── КОНЕЦ ОПРОСОВ ──
+
   // Load list on start if already authenticated
   if (localStorage.getItem('admin_auth')) loadList();
 </script>
 </body>
-  </html>
+</html>
